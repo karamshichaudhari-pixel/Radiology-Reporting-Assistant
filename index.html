@@ -1,0 +1,376 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>RadScribe AI - Dictation & Report Generator</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+  
+  <!-- Added libraries for Markdown parsing and PDF generation -->
+  <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
+</head>
+<body class="bg-slate-100 text-slate-800 font-sans min-h-screen p-4 md:p-8">
+  <div class="max-w-6xl mx-auto space-y-6">
+
+    <!-- Header & Config -->
+    <header class="bg-white p-6 rounded-xl shadow-sm border border-slate-200 flex flex-col md:flex-row md:items-center justify-between gap-4">
+      <div>
+        <h1 class="text-2xl font-bold text-slate-900 flex items-center gap-2">
+          <i class="fa-solid fa-notes-medical text-blue-600"></i> RadScribe AI
+        </h1>
+        <p class="text-sm text-slate-500">Browser-based radiology dictation (Powered by Gemini)</p>
+      </div>
+
+      <div class="flex items-center gap-3">
+        <div class="relative">
+          <input id="apiKeyInput" type="password" placeholder="Google Gemini API Key" 
+                 class="w-64 px-3 py-2 text-sm border rounded-lg focus:ring-2 focus:ring-blue-500 focus:outline-none pr-10">
+          <button id="toggleKeyBtn" class="absolute right-2 top-2.5 text-xs text-slate-400 hover:text-slate-600">Show</button>
+        </div>
+        <button id="saveKeyBtn" class="px-4 py-2 bg-slate-800 hover:bg-slate-900 text-white text-sm font-medium rounded-lg transition">
+          Save Key
+        </button>
+      </div>
+    </header>
+
+    <!-- Main Workspace -->
+    <main class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+
+      <!-- Left Column: Dictation & Controls -->
+      <section class="bg-white p-6 rounded-xl shadow-sm border border-slate-200 space-y-5 flex flex-col">
+        <div class="flex items-center justify-between">
+          <h2 class="text-lg font-semibold text-slate-900">1. Dictate Findings</h2>
+          <span id="recordingBadge" class="hidden items-center gap-1.5 px-3 py-1 bg-red-100 text-red-700 text-xs font-semibold rounded-full animate-pulse">
+            <span class="w-2 h-2 rounded-full bg-red-600"></span> Listening...
+          </span>
+        </div>
+
+        <!-- Quick Macro Templates -->
+        <div>
+          <label class="block text-xs font-medium text-slate-500 mb-1.5">Insert Quick Normal Template</label>
+          <div class="flex flex-wrap gap-2">
+            <button onclick="insertTemplate('cxr')" class="text-xs bg-slate-100 hover:bg-slate-200 px-3 py-1.5 rounded-md border text-slate-700 transition">Normal Chest X-Ray</button>
+            <button onclick="insertTemplate('ct_brain')" class="text-xs bg-slate-100 hover:bg-slate-200 px-3 py-1.5 rounded-md border text-slate-700 transition">Normal CT Brain</button>
+            <button onclick="insertTemplate('usg_abd')" class="text-xs bg-slate-100 hover:bg-slate-200 px-3 py-1.5 rounded-md border text-slate-700 transition">Normal USG Abdomen</button>
+          </div>
+        </div>
+
+        <!-- Examination Type Selection -->
+        <div>
+          <label for="examType" class="block text-xs font-medium text-slate-500 mb-1">Study / Modality Type</label>
+          <select id="examType" class="w-full p-2.5 border rounded-lg text-sm bg-slate-50 focus:ring-2 focus:ring-blue-500 focus:outline-none">
+            <option value="General Radiology">General Study</option>
+            <option value="Chest Radiograph (X-Ray)">Chest Radiograph (X-Ray)</option>
+            <option value="CT Chest / Abdomen / Pelvis">CT Chest / Abdomen / Pelvis</option>
+            <option value="CT Head / Brain">CT Head / Brain</option>
+            <option value="MRI Spine / Musculoskeletal">MRI Spine / MSK</option>
+            <option value="Ultrasound Abdomen & Pelvis">Ultrasound Abdomen & Pelvis</option>
+          </select>
+        </div>
+
+        <!-- Dictated Text Area -->
+        <div class="flex-1 flex flex-col min-h-[220px]">
+          <label for="findingsText" class="block text-xs font-medium text-slate-500 mb-1">Raw Dictated Notes</label>
+          <textarea id="findingsText" placeholder="Click 'Start Dictation' and speak into your microphone, or type findings here..."
+                    class="w-full flex-1 p-3.5 border rounded-lg text-sm leading-relaxed focus:ring-2 focus:ring-blue-500 focus:outline-none resize-none"></textarea>
+        </div>
+
+        <!-- Action Buttons -->
+        <div class="flex gap-3 pt-2">
+          <button id="micBtn" class="flex-1 py-3 px-4 bg-blue-600 hover:bg-blue-700 text-white font-medium rounded-lg flex items-center justify-center gap-2 transition shadow-sm">
+            <i class="fa-solid fa-microphone"></i> <span>Start Dictation</span>
+          </button>
+          <button id="generateBtn" class="flex-1 py-3 px-4 bg-emerald-600 hover:bg-emerald-700 text-white font-medium rounded-lg flex items-center justify-center gap-2 transition shadow-sm">
+            <i class="fa-solid fa-wand-magic-sparkles"></i> <span>Generate Report</span>
+          </button>
+        </div>
+      </section>
+
+      <!-- Right Column: Formatted Report Output -->
+      <section class="bg-white p-6 rounded-xl shadow-sm border border-slate-200 flex flex-col space-y-4">
+        <div class="flex items-center justify-between">
+          <h2 class="text-lg font-semibold text-slate-900">2. Generated Report</h2>
+          <div class="flex gap-2">
+            <!-- NEW PDF BUTTON -->
+            <button id="pdfBtn" class="px-3 py-1.5 text-xs font-medium border bg-red-50 text-red-700 border-red-200 rounded-md hover:bg-red-100 flex items-center gap-1.5 transition">
+              <i class="fa-solid fa-file-pdf"></i> Download PDF
+            </button>
+            <button id="copyBtn" class="px-3 py-1.5 text-xs font-medium border rounded-md hover:bg-slate-50 flex items-center gap-1.5 transition">
+              <i class="fa-regular fa-copy"></i> Copy
+            </button>
+            <button id="clearBtn" class="px-3 py-1.5 text-xs font-medium border text-red-600 hover:bg-red-50 rounded-md transition">
+              Clear
+            </button>
+          </div>
+        </div>
+
+        <!-- Report Output Box -->
+        <div class="flex-1 relative min-h-[360px] flex flex-col">
+          <div id="loadingOverlay" class="hidden absolute inset-0 bg-white/80 backdrop-blur-sm rounded-lg flex flex-col items-center justify-center z-10 space-y-3">
+            <div class="w-8 h-8 border-4 border-emerald-500 border-t-transparent rounded-full animate-spin"></div>
+            <p class="text-sm font-medium text-slate-600">Structuring report & generating Impression...</p>
+          </div>
+          <textarea id="reportOutput" placeholder="The structured radiology report with Impression will appear here..."
+                    class="w-full flex-1 p-4 border rounded-lg font-mono text-sm leading-relaxed bg-slate-50 focus:ring-2 focus:ring-emerald-500 focus:outline-none resize-none"></textarea>
+        </div>
+      </section>
+
+    </main>
+  </div>
+
+  <script>
+    // --- State & DOM References ---
+    const apiKeyInput = document.getElementById('apiKeyInput');
+    const saveKeyBtn = document.getElementById('saveKeyBtn');
+    const toggleKeyBtn = document.getElementById('toggleKeyBtn');
+    const findingsText = document.getElementById('findingsText');
+    const reportOutput = document.getElementById('reportOutput');
+    const micBtn = document.getElementById('micBtn');
+    const generateBtn = document.getElementById('generateBtn');
+    const copyBtn = document.getElementById('copyBtn');
+    const clearBtn = document.getElementById('clearBtn');
+    const pdfBtn = document.getElementById('pdfBtn'); // NEW REFERENCE
+    const recordingBadge = document.getElementById('recordingBadge');
+    const loadingOverlay = document.getElementById('loadingOverlay');
+    const examType = document.getElementById('examType');
+
+    // Load stored API Key
+    const storedKey = localStorage.getItem('rad_gemini_key');
+    if (storedKey) apiKeyInput.value = storedKey;
+
+    saveKeyBtn.addEventListener('click', () => {
+      localStorage.setItem('rad_gemini_key', apiKeyInput.value.trim());
+      alert('Gemini API Key saved locally in your browser!');
+    });
+
+    toggleKeyBtn.addEventListener('click', () => {
+      apiKeyInput.type = apiKeyInput.type === 'password' ? 'text' : 'password';
+      toggleKeyBtn.textContent = apiKeyInput.type === 'password' ? 'Show' : 'Hide';
+    });
+
+    // --- Web Speech API (Microphone Speech-To-Text) ---
+    let recognition = null;
+    let isRecording = false;
+
+    if ('webkitSpeechRecognition' in window || 'SpeechRecognition' in window) {
+      const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+      recognition = new SpeechRecognition();
+      recognition.continuous = true;
+      recognition.interimResults = false;
+      recognition.lang = 'en-US';
+
+      recognition.onresult = (event) => {
+        let transcript = '';
+        for (let i = event.resultIndex; i < event.results.length; ++i) {
+          if (event.results[i].isFinal) {
+            transcript += event.results[i][0].transcript + ' ';
+          }
+        }
+        findingsText.value += transcript;
+      };
+
+      recognition.onerror = (event) => {
+        console.error('Speech recognition error:', event.error);
+        stopRecording();
+      };
+
+      recognition.onend = () => {
+        if (isRecording) recognition.start(); // Auto-restart if stopped unexpectedly
+      };
+    } else {
+      micBtn.disabled = true;
+      micBtn.innerHTML = '<i class="fa-solid fa-microphone-slash"></i> STT Not Supported in this Browser';
+    }
+
+    function startRecording() {
+      if (!recognition) return;
+      isRecording = true;
+      recognition.start();
+      recordingBadge.classList.remove('hidden');
+      recordingBadge.classList.add('flex');
+      micBtn.classList.replace('bg-blue-600', 'bg-red-600');
+      micBtn.classList.replace('hover:bg-blue-700', 'hover:bg-red-700');
+      micBtn.innerHTML = '<i class="fa-solid fa-stop"></i> <span>Stop Dictation</span>';
+    }
+
+    function stopRecording() {
+      if (!recognition) return;
+      isRecording = false;
+      recognition.stop();
+      recordingBadge.classList.add('hidden');
+      recordingBadge.classList.remove('flex');
+      micBtn.classList.replace('bg-red-600', 'bg-blue-600');
+      micBtn.classList.replace('hover:bg-red-700', 'hover:bg-blue-700');
+      micBtn.innerHTML = '<i class="fa-solid fa-microphone"></i> <span>Start Dictation</span>';
+    }
+
+    micBtn.addEventListener('click', () => {
+      if (!isRecording) startRecording();
+      else stopRecording();
+    });
+
+    // --- Quick Normal Templates ---
+    const templates = {
+      cxr: "Cardiomediastinal silhouette is normal. Lungs are clear without focal consolidation, pneumothorax, or pleural effusion. Osseous structures and soft tissues are unremarkable.",
+      ct_brain: "No acute intracranial hemorrhage, territorial acute infarct, or significant mass effect. Ventricular system and basilar cisterns are within normal limits for age. Calvarium is intact.",
+      usg_abd: "Liver has normal size and echotexture with no focal lesions. Gallbladder is normal without calculi or wall thickening. Spleen, pancreas, and bilateral kidneys are normal. No ascites."
+    };
+
+    window.insertTemplate = (key) => {
+      findingsText.value = (findingsText.value ? findingsText.value + "\n" : "") + templates[key];
+    };
+
+    // --- Report Generation via Google Gemini API ---
+    generateBtn.addEventListener('click', async () => {
+      const apiKey = apiKeyInput.value.trim();
+      const findings = findingsText.value.trim();
+
+      if (!apiKey) {
+        alert('Please enter your Google Gemini API key at the top right.');
+        return;
+      }
+      if (!findings) {
+        alert('Please dictate or type findings first.');
+        return;
+      }
+
+      if (isRecording) stopRecording();
+      loadingOverlay.classList.remove('hidden');
+
+      const systemPrompt = `You are an expert radiologist and medical report generator.
+Convert the provided raw, dictated findings into a clean, formal, professional radiology report.
+
+Rules:
+1. Fix common speech-to-text phonetic misrecognitions of radiological vocabulary.
+2. Maintain standard radiological structure:
+   - EXAMINATION
+   - CLINICAL INDICATION (infer if mentioned, else 'Not provided')
+   - TECHNIQUE / COMPARISON
+   - FINDINGS (organize anatomically or by organ systems with bullet points)
+   - IMPRESSION (Numbered, concise, ordered by clinical urgency).
+3. Do not invent diagnoses not implied by the dictation.`;
+
+      const userPrompt = `Study: ${examType.value}\nRaw Dictated Notes:\n${findings}`;
+
+      try {
+        const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash:generateContent?key=${apiKey}`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({
+            system_instruction: {
+              parts: [{ text: systemPrompt }]
+            },
+            contents: [{
+              role: 'user',
+              parts: [{ text: userPrompt }]
+            }],
+            generationConfig: {
+              temperature: 0.2
+            }
+          })
+        });
+
+        const data = await response.json();
+        
+        if (data.error) throw new Error(data.error.message);
+        if (!data.candidates || data.candidates.length === 0) throw new Error("No response generated.");
+
+        reportOutput.value = data.candidates[0].content.parts[0].text.trim();
+      } catch (err) {
+        alert('Error generating report: ' + err.message);
+      } finally {
+        loadingOverlay.classList.add('hidden');
+      }
+    });
+
+    // --- NEW: PDF GENERATION LOGIC ---
+    pdfBtn.addEventListener('click', () => {
+      const reportText = reportOutput.value.trim();
+      if (!reportText) {
+        alert('There is no report to download. Please generate one first.');
+        return;
+      }
+
+      // 1. Convert the Markdown text to HTML using marked.js
+      const formattedHTML = marked.parse(reportText);
+
+      // 2. Create a hidden element structured like a clinical document
+      const printDiv = document.createElement('div');
+      
+      // Get today's date formatted appropriately
+      const today = new Date().toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' });
+      
+      printDiv.innerHTML = `
+        <div style="font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; padding: 40px; color: #1f2937; background: #ffffff;">
+          <!-- Clinical Header -->
+          <div style="text-align: center; border-bottom: 2px solid #2563eb; padding-bottom: 15px; margin-bottom: 30px;">
+            <h1 style="color: #1e3a8a; margin: 0; font-size: 24px; text-transform: uppercase; letter-spacing: 1px;">Radiology Report</h1>
+            <p style="color: #64748b; margin: 5px 0 0 0; font-size: 14px;">Automated Dictation System</p>
+          </div>
+          
+          <!-- Patient & Study Info Box -->
+          <div style="background: #f8fafc; border: 1px solid #e2e8f0; padding: 15px; border-radius: 6px; margin-bottom: 30px; font-size: 14px; display: flex; justify-content: space-between;">
+            <div>
+              <strong>Study Type:</strong> ${examType.value}<br>
+              <strong>Report Date:</strong> ${today}
+            </div>
+            <div style="text-align: right;">
+              <strong>Patient Name:</strong> ________________<br>
+              <strong>Patient ID:</strong> ________________
+            </div>
+          </div>
+
+          <!-- The Actual Report Body -->
+          <div style="font-size: 14px; line-height: 1.6;">
+            ${formattedHTML}
+          </div>
+
+          <!-- Signature Line -->
+          <div style="margin-top: 60px; text-align: right; font-size: 14px;">
+            <p style="margin-bottom: 5px;">_________________________</p>
+            <p style="margin: 0; color: #475569;"><strong>Radiologist Signature</strong></p>
+          </div>
+        </div>
+      `;
+
+      // 3. Set the PDF styling options
+      const opt = {
+        margin:       [0.5, 0.5, 0.5, 0.5], // Top, Left, Bottom, Right margins in inches
+        filename:     `Radiology_Report_${today.replace(/ /g, '_')}.pdf`,
+        image:        { type: 'jpeg', quality: 0.98 },
+        html2canvas:  { scale: 2, useCORS: true },
+        jsPDF:        { unit: 'in', format: 'a4', orientation: 'portrait' }
+      };
+
+      // 4. Generate the file and change button state temporarily
+      const originalBtnHtml = pdfBtn.innerHTML;
+      pdfBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Saving...';
+      
+      html2pdf().set(opt).from(printDiv).save().then(() => {
+        pdfBtn.innerHTML = originalBtnHtml; // Reset button
+      });
+    });
+
+    // --- Copy & Clear ---
+    copyBtn.addEventListener('click', () => {
+      if (!reportOutput.value) return;
+      navigator.clipboard.writeText(reportOutput.value);
+      copyBtn.innerHTML = '<i class="fa-solid fa-check text-green-600"></i> Copied!';
+      setTimeout(() => {
+        copyBtn.innerHTML = '<i class="fa-regular fa-copy"></i> Copy';
+      }, 2000);
+    });
+
+    clearBtn.addEventListener('click', () => {
+      if (confirm('Clear both dictated findings and generated report?')) {
+        findingsText.value = '';
+        reportOutput.value = '';
+      }
+    });
+  </script>
+</body>
+</html>
